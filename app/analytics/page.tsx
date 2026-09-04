@@ -8,7 +8,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 const supabase = createClient();
@@ -31,10 +31,36 @@ type Tracker = {
 };
 
 type FinanceEntry = {
+  user_id: string;
   entry_date: string;
   entry_type: "income" | "expense";
   amount: number;
 };
+
+function getLocalDateString(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function getLastSevenDates(today: string) {
+  if (!today) {
+    return [];
+  }
+
+  const dates: string[] = [];
+  const base = new Date(`${today}T00:00:00`);
+
+  for (let i = 6; i >= 0; i -= 1) {
+    const date = new Date(base);
+    date.setDate(base.getDate() - i);
+    dates.push(getLocalDateString(date));
+  }
+
+  return dates;
+}
 
 function sleepMinutes(
   sleepTime: string | null,
@@ -85,38 +111,26 @@ function formatDuration(minutes: number | null) {
   return `${hours}h ${remaining}m`;
 }
 
-function getLastSevenDates(today: string) {
-  const dates: string[] = [];
-
-  if (!today) {
-    return dates;
-  }
-
-  const base = new Date(`${today}T00:00:00`);
-
-  for (let i = 6; i >= 0; i -= 1) {
-    const date = new Date(base);
-    date.setDate(base.getDate() - i);
-    dates.push(date.toISOString().split("T")[0]);
-  }
-
-  return dates;
+function formatChartDate(date: string) {
+  return date.slice(5);
 }
 
 export default function AnalyticsPage() {
   const [today, setToday] = useState("");
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [trackers, setTrackers] = useState<Tracker[]>([]);
-  const [financeEntries, setFinanceEntries] = useState<
-    FinanceEntry[]
-  >([]);
+  const [financeEntries, setFinanceEntries] = useState<FinanceEntry[]>(
+    [],
+  );
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
     async function loadAnalytics() {
-      const currentDate = new Date().toISOString().split("T")[0];
+      setLoading(true);
+      setMessage("");
 
+      const currentDate = getLocalDateString();
       setToday(currentDate);
 
       const {
@@ -135,12 +149,15 @@ export default function AnalyticsPage() {
           .select("user_id, person");
 
       if (profileError) {
+        console.error(profileError);
         setMessage("Could not load AKRI profiles.");
         setLoading(false);
         return;
       }
 
-      setProfiles(profileData ?? []);
+      const loadedProfiles = (profileData ?? []) as Profile[];
+
+      setProfiles(loadedProfiles);
 
       const { data: trackerData, error: trackerError } =
         await supabase
@@ -151,26 +168,28 @@ export default function AnalyticsPage() {
           .order("entry_date", { ascending: true });
 
       if (trackerError) {
+        console.error(trackerError);
         setMessage("Could not load tracker data.");
         setLoading(false);
         return;
       }
 
-      setTrackers(trackerData ?? []);
+      setTrackers((trackerData ?? []) as Tracker[]);
 
       const { data: financeData, error: financeError } =
         await supabase
           .from("finance_entries")
-          .select("entry_date, entry_type, amount")
+          .select("user_id, entry_date, entry_type, amount")
           .order("entry_date", { ascending: true });
 
       if (financeError) {
+        console.error(financeError);
         setMessage("Could not load finance data.");
         setLoading(false);
         return;
       }
 
-      setFinanceEntries(financeData ?? []);
+      setFinanceEntries((financeData ?? []) as FinanceEntry[]);
       setLoading(false);
     }
 
@@ -185,24 +204,39 @@ export default function AnalyticsPage() {
     (profile) => profile.person === "rishi",
   );
 
-  const akshayaTrackers = trackers.filter(
-    (tracker) => tracker.user_id === akshayaProfile?.user_id,
+  const akshayaTrackers = useMemo(
+    () =>
+      trackers.filter(
+        (tracker) => tracker.user_id === akshayaProfile?.user_id,
+      ),
+    [trackers, akshayaProfile?.user_id],
   );
 
-  const rishiTrackers = trackers.filter(
-    (tracker) => tracker.user_id === rishiProfile?.user_id,
+  const rishiTrackers = useMemo(
+    () =>
+      trackers.filter(
+        (tracker) => tracker.user_id === rishiProfile?.user_id,
+      ),
+    [trackers, rishiProfile?.user_id],
   );
 
-  const lastSevenDates = getLastSevenDates(today);
+  const lastSevenDates = useMemo(
+    () => getLastSevenDates(today),
+    [today],
+  );
+
+  function findTracker(
+    trackerList: Tracker[],
+    date: string,
+  ) {
+    return trackerList.find(
+      (entry) => entry.entry_date.slice(0, 10) === date,
+    );
+  }
 
   const sleepChartData = lastSevenDates.map((date) => {
-    const akshayaEntry = akshayaTrackers.find(
-      (entry) => entry.entry_date === date,
-    );
-
-    const rishiEntry = rishiTrackers.find(
-      (entry) => entry.entry_date === date,
-    );
+    const akshayaEntry = findTracker(akshayaTrackers, date);
+    const rishiEntry = findTracker(rishiTrackers, date);
 
     const akshayaSleep = sleepMinutes(
       akshayaEntry?.sleep_time ?? null,
@@ -215,7 +249,7 @@ export default function AnalyticsPage() {
     );
 
     return {
-      date: date.slice(5),
+      date: formatChartDate(date),
       Akshaya:
         akshayaSleep === null
           ? null
@@ -228,64 +262,48 @@ export default function AnalyticsPage() {
   });
 
   const workChartData = lastSevenDates.map((date) => {
-    const akshayaEntry = akshayaTrackers.find(
-      (entry) => entry.entry_date === date,
-    );
-
-    const rishiEntry = rishiTrackers.find(
-      (entry) => entry.entry_date === date,
-    );
+    const akshayaEntry = findTracker(akshayaTrackers, date);
+    const rishiEntry = findTracker(rishiTrackers, date);
 
     return {
-      date: date.slice(5),
-      Akshaya: akshayaEntry?.work_minutes ?? 0,
-      Rishi: rishiEntry?.work_minutes ?? 0,
+      date: formatChartDate(date),
+      Akshaya: Number(akshayaEntry?.work_minutes ?? 0),
+      Rishi: Number(rishiEntry?.work_minutes ?? 0),
     };
   });
 
   const collegeChartData = lastSevenDates.map((date) => {
-    const akshayaEntry = akshayaTrackers.find(
-      (entry) => entry.entry_date === date,
-    );
-
-    const rishiEntry = rishiTrackers.find(
-      (entry) => entry.entry_date === date,
-    );
+    const akshayaEntry = findTracker(akshayaTrackers, date);
+    const rishiEntry = findTracker(rishiTrackers, date);
 
     return {
-      date: date.slice(5),
-      Akshaya: akshayaEntry?.college_minutes ?? 0,
-      Rishi: rishiEntry?.college_minutes ?? 0,
+      date: formatChartDate(date),
+      Akshaya: Number(akshayaEntry?.college_minutes ?? 0),
+      Rishi: Number(rishiEntry?.college_minutes ?? 0),
     };
   });
 
   const socialChartData = lastSevenDates.map((date) => {
-    const akshayaEntry = akshayaTrackers.find(
-      (entry) => entry.entry_date === date,
-    );
-
-    const rishiEntry = rishiTrackers.find(
-      (entry) => entry.entry_date === date,
-    );
+    const akshayaEntry = findTracker(akshayaTrackers, date);
+    const rishiEntry = findTracker(rishiTrackers, date);
 
     return {
-      date: date.slice(5),
-      Akshaya: akshayaEntry?.social_media_minutes ?? 0,
-      Rishi: rishiEntry?.social_media_minutes ?? 0,
+      date: formatChartDate(date),
+      Akshaya: Number(
+        akshayaEntry?.social_media_minutes ?? 0,
+      ),
+      Rishi: Number(
+        rishiEntry?.social_media_minutes ?? 0,
+      ),
     };
   });
 
   const workoutChartData = lastSevenDates.map((date) => {
-    const akshayaEntry = akshayaTrackers.find(
-      (entry) => entry.entry_date === date,
-    );
-
-    const rishiEntry = rishiTrackers.find(
-      (entry) => entry.entry_date === date,
-    );
+    const akshayaEntry = findTracker(akshayaTrackers, date);
+    const rishiEntry = findTracker(rishiTrackers, date);
 
     return {
-      date: date.slice(5),
+      date: formatChartDate(date),
       Akshaya: akshayaEntry?.workout_done ? 1 : 0,
       Rishi: rishiEntry?.workout_done ? 1 : 0,
     };
@@ -295,19 +313,22 @@ export default function AnalyticsPage() {
     const total = financeEntries
       .filter(
         (entry) =>
-          entry.entry_date === date &&
+          entry.entry_date.slice(0, 10) === date &&
           entry.entry_type === "expense",
       )
-      .reduce((sum, entry) => sum + Number(entry.amount), 0);
+      .reduce(
+        (sum, entry) => sum + Number(entry.amount),
+        0,
+      );
 
     return {
-      date: date.slice(5),
+      date: formatChartDate(date),
       Expenses: total,
     };
   });
 
   const weeklyTrackers = trackers.filter((entry) =>
-    lastSevenDates.includes(entry.entry_date),
+    lastSevenDates.includes(entry.entry_date.slice(0, 10)),
   );
 
   const sleepValues = weeklyTrackers
@@ -319,23 +340,28 @@ export default function AnalyticsPage() {
   const averageSleepMinutes =
     sleepValues.length > 0
       ? Math.round(
-          sleepValues.reduce((sum, value) => sum + value, 0) /
-            sleepValues.length,
+          sleepValues.reduce(
+            (sum, value) => sum + value,
+            0,
+          ) / sleepValues.length,
         )
       : null;
 
   const totalWorkMinutes = weeklyTrackers.reduce(
-    (sum, entry) => sum + (entry.work_minutes ?? 0),
+    (sum, entry) =>
+      sum + Number(entry.work_minutes ?? 0),
     0,
   );
 
   const totalCollegeMinutes = weeklyTrackers.reduce(
-    (sum, entry) => sum + (entry.college_minutes ?? 0),
+    (sum, entry) =>
+      sum + Number(entry.college_minutes ?? 0),
     0,
   );
 
   const totalSocialMinutes = weeklyTrackers.reduce(
-    (sum, entry) => sum + (entry.social_media_minutes ?? 0),
+    (sum, entry) =>
+      sum + Number(entry.social_media_minutes ?? 0),
     0,
   );
 
@@ -343,34 +369,41 @@ export default function AnalyticsPage() {
     (entry) => entry.workout_done,
   ).length;
 
-  const moodValues = weeklyTrackers
-    .map((entry) => entry.mood)
-    .filter(Boolean);
+  const latestMoodEntry = [...weeklyTrackers]
+    .filter((entry) => entry.mood)
+    .sort((a, b) =>
+      a.entry_date.localeCompare(b.entry_date),
+    )
+    .at(-1);
 
-  const latestMood =
-    moodValues.length > 0
-      ? moodValues[moodValues.length - 1]
-      : null;
+  const latestMood = latestMoodEntry?.mood ?? null;
 
   const currentMonth = today.slice(0, 7);
 
   const monthlyExpenses = financeEntries
     .filter(
       (entry) =>
-        entry.entry_date.startsWith(currentMonth) &&
+        entry.entry_date.slice(0, 7) === currentMonth &&
         entry.entry_type === "expense",
     )
-    .reduce((sum, entry) => sum + Number(entry.amount), 0);
+    .reduce(
+      (sum, entry) => sum + Number(entry.amount),
+      0,
+    );
 
   const monthlyIncome = financeEntries
     .filter(
       (entry) =>
-        entry.entry_date.startsWith(currentMonth) &&
+        entry.entry_date.slice(0, 7) === currentMonth &&
         entry.entry_type === "income",
     )
-    .reduce((sum, entry) => sum + Number(entry.amount), 0);
+    .reduce(
+      (sum, entry) => sum + Number(entry.amount),
+      0,
+    );
 
-  const monthlyBalance = monthlyIncome - monthlyExpenses;
+  const monthlyBalance =
+    monthlyIncome - monthlyExpenses;
 
   if (loading) {
     return (
@@ -417,7 +450,11 @@ export default function AnalyticsPage() {
           </h1>
 
           <p className="mt-2 text-sm text-[#777]">
-            Understand your habits, progress, and shared life over time.
+            Your shared habits, progress, and money over the last 7 days.
+          </p>
+
+          <p className="mt-2 text-xs text-[#aaa]">
+            Showing {lastSevenDates[0]} → {today}
           </p>
         </div>
 
@@ -434,7 +471,7 @@ export default function AnalyticsPage() {
             </p>
 
             <p className="mt-2 text-sm text-[#888]">
-              Weekly average
+              Average across both
             </p>
           </section>
 
@@ -448,7 +485,7 @@ export default function AnalyticsPage() {
             </p>
 
             <p className="mt-2 text-sm text-[#888]">
-              Total this week
+              Combined this week
             </p>
           </section>
 
@@ -462,7 +499,7 @@ export default function AnalyticsPage() {
             </p>
 
             <p className="mt-2 text-sm text-[#888]">
-              Total this week
+              Combined this week
             </p>
           </section>
 
@@ -696,7 +733,9 @@ export default function AnalyticsPage() {
 
                   <Tooltip
                     formatter={(value) =>
-                      Number(value) === 1 ? "Done" : "Not done"
+                      Number(value) === 1
+                        ? "Done"
+                        : "Not done"
                     }
                   />
 
@@ -743,7 +782,9 @@ export default function AnalyticsPage() {
 
                   <Tooltip
                     formatter={(value) =>
-                      `₹${Number(value).toLocaleString("en-IN")}`
+                      `₹${Number(value).toLocaleString(
+                        "en-IN",
+                      )}`
                     }
                   />
 
@@ -760,7 +801,7 @@ export default function AnalyticsPage() {
           </section>
         </div>
 
-        {/* Mood + weekly summary */}
+        {/* Weekly Summary */}
         <section className="mt-5 rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
           <p className="text-sm text-[#888]">
             Shared progress
@@ -844,7 +885,7 @@ export default function AnalyticsPage() {
           </div>
         </section>
 
-        {/* Finance summary */}
+        {/* Finance */}
         <section className="mt-5 rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
           <p className="text-sm text-[#888]">
             Finance
