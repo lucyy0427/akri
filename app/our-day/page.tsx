@@ -3,303 +3,346 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-const moods = ["Happy", "Sad", "Confused", "Angry", "Neutral"];
-
 const supabase = createClient();
 
+type OurDayData = {
+  shared_note: string;
+  akshaya_task: string;
+  rishi_task: string;
+  akshaya_task_done: boolean;
+  rishi_task_done: boolean;
+};
+
+const emptyData: OurDayData = {
+  shared_note: "",
+  akshaya_task: "",
+  rishi_task: "",
+  akshaya_task_done: false,
+  rishi_task_done: false,
+};
+
 export default function OurDayPage() {
-  const [userId, setUserId] = useState("");
+  const [today, setToday] = useState("");
+  const [data, setData] = useState<OurDayData>(emptyData);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
-
-  const [mood, setMood] = useState("");
-  const [wakeTime, setWakeTime] = useState("");
-  const [sleepTime, setSleepTime] = useState("");
-
-  const [breakfast, setBreakfast] = useState("");
-  const [lunch, setLunch] = useState("");
-  const [dinner, setDinner] = useState("");
-
-  const [workMinutes, setWorkMinutes] = useState("0");
-  const [collegeMinutes, setCollegeMinutes] = useState("0");
-  const [socialMinutes, setSocialMinutes] = useState("0");
-
-  const [workoutDone, setWorkoutDone] = useState(false);
-  const [workoutNotes, setWorkoutNotes] = useState("");
-
-  const [today, setToday] = useState("");
+  const [profileError, setProfileError] = useState("");
 
   useEffect(() => {
-    const currentToday = new Date().toISOString().split("T")[0];
+    async function loadData() {
+      const currentDate = new Date().toISOString().split("T")[0];
+      setToday(currentDate);
 
-    setToday(currentToday);
-
-    async function loadToday() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
 
       if (!user) {
+        setProfileError("You are not logged in.");
         setLoading(false);
         return;
       }
 
-      setUserId(user.id);
-
-      const { data } = await supabase
-        .from("daily_tracker")
-        .select("*")
+      const { data: profile, error: profileError } = await supabase
+        .from("akri_profiles")
+        .select("person")
         .eq("user_id", user.id)
-        .eq("entry_date", currentToday)
         .maybeSingle();
 
-      if (data) {
-        setMood(data.mood ?? "");
-        setWakeTime(data.wake_time ?? "");
-        setSleepTime(data.sleep_time ?? "");
-        setBreakfast(data.breakfast ?? "");
-        setLunch(data.lunch ?? "");
-        setDinner(data.dinner ?? "");
-        setWorkMinutes(String(data.work_minutes ?? 0));
-        setCollegeMinutes(String(data.college_minutes ?? 0));
-        setSocialMinutes(String(data.social_media_minutes ?? 0));
-        setWorkoutDone(data.workout_done ?? false);
-        setWorkoutNotes(data.workout_notes ?? "");
+      if (profileError) {
+        setProfileError("Could not verify your AKRI profile.");
+        setLoading(false);
+        return;
+      }
+
+      if (!profile) {
+        setProfileError("This account is not connected to AKRI.");
+        setLoading(false);
+        return;
+      }
+
+      const { data: sharedDay, error: sharedDayError } = await supabase
+        .from("our_day")
+        .select("*")
+        .eq("entry_date", currentDate)
+        .maybeSingle();
+
+      if (sharedDayError) {
+        setMessage("Could not load today's shared day.");
+        setLoading(false);
+        return;
+      }
+
+      if (sharedDay) {
+        setData({
+          shared_note: sharedDay.shared_note ?? "",
+          akshaya_task: sharedDay.akshaya_task ?? "",
+          rishi_task: sharedDay.rishi_task ?? "",
+          akshaya_task_done: sharedDay.akshaya_task_done ?? false,
+          rishi_task_done: sharedDay.rishi_task_done ?? false,
+        });
       }
 
       setLoading(false);
     }
 
-    loadToday();
+    loadData();
   }, []);
 
+  function updateField<K extends keyof OurDayData>(
+    field: K,
+    value: OurDayData[K],
+  ) {
+    setData((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
   async function saveToday() {
-    if (!userId || !today) return;
+    if (!today) return;
 
     setSaving(true);
     setMessage("");
 
-    const { error } = await supabase.from("daily_tracker").upsert(
+    const { error } = await supabase.from("our_day").upsert(
       {
-        user_id: userId,
         entry_date: today,
-        mood: mood || null,
-        wake_time: wakeTime || null,
-        sleep_time: sleepTime || null,
-        breakfast: breakfast || null,
-        lunch: lunch || null,
-        dinner: dinner || null,
-        work_minutes: Number(workMinutes) || 0,
-        college_minutes: Number(collegeMinutes) || 0,
-        social_media_minutes: Number(socialMinutes) || 0,
-        workout_done: workoutDone,
-        workout_notes: workoutNotes || null,
+        shared_note: data.shared_note || null,
+        akshaya_task: data.akshaya_task || null,
+        rishi_task: data.rishi_task || null,
+        akshaya_task_done: data.akshaya_task_done,
+        rishi_task_done: data.rishi_task_done,
         updated_at: new Date().toISOString(),
       },
       {
-        onConflict: "user_id,entry_date",
-      }
+        onConflict: "entry_date",
+      },
     );
 
-    setSaving(false);
-
     if (error) {
-      setMessage(error.message);
-      return;
+      setMessage(`Could not save: ${error.message}`);
+    } else {
+      setMessage("Today's shared day saved.");
     }
 
-    setMessage("Today's progress saved.");
+    setSaving(false);
   }
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-[#f5f5f0] p-8">
-        <p className="text-sm text-[#777]">
-          Loading today&apos;s tracker...
-        </p>
+      <main className="min-h-screen bg-[#f5f5f0] p-6 md:p-10">
+        <div className="mx-auto max-w-5xl">
+          <p className="text-sm text-[#777]">
+            Loading your shared day...
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  if (profileError) {
+    return (
+      <main className="min-h-screen bg-[#f5f5f0] p-6 md:p-10">
+        <div className="mx-auto max-w-5xl">
+          <div className="rounded-3xl border border-black/5 bg-white p-8 shadow-sm">
+            <h1 className="text-2xl font-semibold tracking-tight text-[#252525]">
+              Our Day
+            </h1>
+
+            <p className="mt-3 text-sm text-[#777]">
+              {profileError}
+            </p>
+          </div>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f5f0] px-5 py-8 pb-28 md:px-10 md:py-10">
+    <main className="min-h-screen bg-[#f5f5f0] p-5 pb-24 text-[#252525] md:p-10 md:pb-10">
       <div className="mx-auto max-w-5xl">
+
+        {/* Header */}
         <div className="mb-8">
-          <p className="text-sm text-[#888]">Today · {today}</p>
+          <p className="text-sm text-[#888]">
+            Shared space
+          </p>
 
           <h1 className="mt-1 text-3xl font-semibold tracking-tight text-[#252525]">
             Our Day
           </h1>
 
           <p className="mt-2 text-sm text-[#777]">
-            Keep track of the little things that make your day.
+            Plan the day together and keep track of what matters.
           </p>
+
+          {today && (
+            <p className="mt-3 text-xs text-[#999]">
+              {today}
+            </p>
+          )}
         </div>
 
         <div className="grid gap-5 md:grid-cols-2">
-          <section className="rounded-2xl bg-white p-6 shadow-sm">
+
+          {/* Shared Note */}
+          <section className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm md:col-span-2">
             <h2 className="text-lg font-semibold text-[#252525]">
-              Mood
+              Shared note
             </h2>
 
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
-              {moods.map((item) => (
-                <button
-                  key={item}
-                  onClick={() => setMood(item)}
-                  className={`rounded-xl border px-3 py-2 text-sm transition ${
-                    mood === item
-                      ? "border-[#252525] bg-[#252525] text-white"
-                      : "border-black/10 text-[#666] hover:bg-[#f5f5f0]"
-                  }`}
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="rounded-2xl bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-[#252525]">
-              Sleep
-            </h2>
-
-            <div className="mt-4 grid grid-cols-2 gap-4">
-              <label className="text-sm text-[#666]">
-                Wake time
-
-                <input
-                  type="time"
-                  value={wakeTime}
-                  onChange={(e) => setWakeTime(e.target.value)}
-                  className="mt-2 w-full rounded-xl border border-black/10 px-3 py-2.5 text-[#252525]"
-                />
-              </label>
-
-              <label className="text-sm text-[#666]">
-                Sleep time
-
-                <input
-                  type="time"
-                  value={sleepTime}
-                  onChange={(e) => setSleepTime(e.target.value)}
-                  className="mt-2 w-full rounded-xl border border-black/10 px-3 py-2.5 text-[#252525]"
-                />
-              </label>
-            </div>
-          </section>
-
-          <section className="rounded-2xl bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-[#252525]">
-              Meals
-            </h2>
-
-            <div className="mt-4 space-y-3">
-              <input
-                value={breakfast}
-                onChange={(e) => setBreakfast(e.target.value)}
-                placeholder="Breakfast"
-                className="w-full rounded-xl border border-black/10 px-3 py-2.5"
-              />
-
-              <input
-                value={lunch}
-                onChange={(e) => setLunch(e.target.value)}
-                placeholder="Lunch"
-                className="w-full rounded-xl border border-black/10 px-3 py-2.5"
-              />
-
-              <input
-                value={dinner}
-                onChange={(e) => setDinner(e.target.value)}
-                placeholder="Dinner"
-                className="w-full rounded-xl border border-black/10 px-3 py-2.5"
-              />
-            </div>
-          </section>
-
-          <section className="rounded-2xl bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-[#252525]">
-              Time
-            </h2>
-
-            <div className="mt-4 space-y-4">
-              <label className="block text-sm text-[#666]">
-                Money-earning work (minutes)
-
-                <input
-                  type="number"
-                  min="0"
-                  value={workMinutes}
-                  onChange={(e) => setWorkMinutes(e.target.value)}
-                  className="mt-2 w-full rounded-xl border border-black/10 px-3 py-2.5"
-                />
-              </label>
-
-              <label className="block text-sm text-[#666]">
-                College work (minutes)
-
-                <input
-                  type="number"
-                  min="0"
-                  value={collegeMinutes}
-                  onChange={(e) => setCollegeMinutes(e.target.value)}
-                  className="mt-2 w-full rounded-xl border border-black/10 px-3 py-2.5"
-                />
-              </label>
-
-              <label className="block text-sm text-[#666]">
-                Social media (minutes)
-
-                <input
-                  type="number"
-                  min="0"
-                  value={socialMinutes}
-                  onChange={(e) => setSocialMinutes(e.target.value)}
-                  className="mt-2 w-full rounded-xl border border-black/10 px-3 py-2.5"
-                />
-              </label>
-            </div>
-          </section>
-
-          <section className="rounded-2xl bg-white p-6 shadow-sm md:col-span-2">
-            <h2 className="text-lg font-semibold text-[#252525]">
-              Workout
-            </h2>
-
-            <label className="mt-4 flex items-center gap-3 text-sm text-[#555]">
-              <input
-                type="checkbox"
-                checked={workoutDone}
-                onChange={(e) => setWorkoutDone(e.target.checked)}
-                className="h-4 w-4"
-              />
-
-              Workout completed today
-            </label>
+            <p className="mt-1 text-sm text-[#888]">
+              Anything you both want to remember today.
+            </p>
 
             <textarea
-              value={workoutNotes}
-              onChange={(e) => setWorkoutNotes(e.target.value)}
-              placeholder="Workout notes..."
-              rows={4}
-              className="mt-4 w-full rounded-xl border border-black/10 px-3 py-2.5"
+              placeholder="Write something for both of you..."
+              value={data.shared_note}
+              onChange={(e) =>
+                updateField("shared_note", e.target.value)
+              }
+              rows={5}
+              className="mt-5 w-full resize-none rounded-xl border border-black/10 bg-[#fafaf7] px-3 py-3 text-sm text-[#252525] outline-none placeholder:text-[#999] focus:border-black/20"
             />
+          </section>
+
+          {/* Akshaya Task */}
+          <section className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wider text-[#999]">
+                  Akshaya
+                </p>
+
+                <h2 className="mt-1 text-lg font-semibold text-[#252525]">
+                  Today&apos;s task
+                </h2>
+              </div>
+
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-[#666]">
+                <input
+                  type="checkbox"
+                  checked={data.akshaya_task_done}
+                  onChange={(e) =>
+                    updateField(
+                      "akshaya_task_done",
+                      e.target.checked,
+                    )
+                  }
+                  className="h-5 w-5 rounded border-black/20"
+                />
+
+                Done
+              </label>
+            </div>
+
+            <input
+              type="text"
+              placeholder="Assign or write Akshaya's task..."
+              value={data.akshaya_task}
+              onChange={(e) =>
+                updateField("akshaya_task", e.target.value)
+              }
+              className="mt-5 w-full rounded-xl border border-black/10 bg-[#fafaf7] px-3 py-3 text-sm text-[#252525] outline-none placeholder:text-[#999] focus:border-black/20"
+            />
+          </section>
+
+          {/* Rishi Task */}
+          <section className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wider text-[#999]">
+                  Rishi
+                </p>
+
+                <h2 className="mt-1 text-lg font-semibold text-[#252525]">
+                  Today&apos;s task
+                </h2>
+              </div>
+
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-[#666]">
+                <input
+                  type="checkbox"
+                  checked={data.rishi_task_done}
+                  onChange={(e) =>
+                    updateField(
+                      "rishi_task_done",
+                      e.target.checked,
+                    )
+                  }
+                  className="h-5 w-5 rounded border-black/20"
+                />
+
+                Done
+              </label>
+            </div>
+
+            <input
+              type="text"
+              placeholder="Assign or write Rishi's task..."
+              value={data.rishi_task}
+              onChange={(e) =>
+                updateField("rishi_task", e.target.value)
+              }
+              className="mt-5 w-full rounded-xl border border-black/10 bg-[#fafaf7] px-3 py-3 text-sm text-[#252525] outline-none placeholder:text-[#999] focus:border-black/20"
+            />
+          </section>
+
+          {/* Progress */}
+          <section className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm md:col-span-2">
+            <h2 className="text-lg font-semibold text-[#252525]">
+              Today&apos;s progress
+            </h2>
+
+            <p className="mt-1 text-sm text-[#888]">
+              A quick view of the shared tasks.
+            </p>
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl bg-[#f5f5f0] p-4">
+                <p className="text-sm font-medium text-[#555]">
+                  Akshaya
+                </p>
+
+                <p className="mt-1 text-sm text-[#888]">
+                  {data.akshaya_task_done
+                    ? "Task completed"
+                    : "Task pending"}
+                </p>
+              </div>
+
+              <div className="rounded-2xl bg-[#f5f5f0] p-4">
+                <p className="text-sm font-medium text-[#555]">
+                  Rishi
+                </p>
+
+                <p className="mt-1 text-sm text-[#888]">
+                  {data.rishi_task_done
+                    ? "Task completed"
+                    : "Task pending"}
+                </p>
+              </div>
+            </div>
           </section>
         </div>
 
-        <div className="mt-6 flex items-center gap-4">
+        {/* Save */}
+        <div className="mt-6 flex flex-col items-start gap-3 sm:flex-row sm:items-center">
           <button
+            type="button"
             onClick={saveToday}
             disabled={saving}
-            className="rounded-xl bg-[#252525] px-6 py-3 text-sm font-medium text-white transition hover:bg-black disabled:opacity-50"
+            className="rounded-xl bg-[#252525] px-6 py-3 text-sm font-medium text-white transition hover:bg-[#111] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {saving ? "Saving..." : "Save today&apos;s progress"}
+            {saving ? "Saving..." : "Save today"}
           </button>
 
           {message && (
-            <p className="text-sm text-[#666]">{message}</p>
+            <p className="text-sm text-[#777]">
+              {message}
+            </p>
           )}
         </div>
       </div>
