@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { CheckCircle2, Clock3 } from "lucide-react";
+import { Bell, CheckCircle2, Clock3 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 const supabase = createClient();
@@ -29,6 +29,16 @@ type SharedDay = {
   rishi_task: string | null;
   akshaya_task_done: boolean | null;
   rishi_task_done: boolean | null;
+};
+
+type Reminder = {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string | null;
+  reminder_date: string;
+  reminder_time: string;
+  completed: boolean;
 };
 
 type Task = {
@@ -60,6 +70,7 @@ export default function DashboardPage() {
   const [shared, setShared] = useState<SharedDay | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
 
   useEffect(() => {
     async function loadDashboard() {
@@ -178,6 +189,26 @@ export default function DashboardPage() {
       }
 
       setTasks((taskData ?? []) as Task[]);
+
+      const { data: reminderData, error: reminderError } =
+        await supabase
+          .from("reminders")
+          .select(
+            "id, user_id, title, description, reminder_date, reminder_time, completed",
+          )
+          .eq("user_id", user.id)
+          .eq("completed", false)
+          .order("reminder_date", { ascending: true })
+          .order("reminder_time", { ascending: true });
+
+      if (reminderError) {
+        console.error(reminderError);
+        setMessage("Could not load your reminders.");
+        setLoading(false);
+        return;
+      }
+
+      setReminders((reminderData ?? []) as Reminder[]);
       setLoading(false);
     }
 
@@ -421,6 +452,85 @@ export default function DashboardPage() {
                   </div>
                 );
               })
+            )}
+          </div>
+        </section>
+
+        {/* Today's Reminders */}
+        <section className="mb-5 rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-medium uppercase tracking-wider text-[#999]">
+                  Personal
+                </p>
+
+                <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-[#f5f5f0]">
+                  <Bell size={15} strokeWidth={1.7} />
+                </span>
+              </div>
+
+              <h2 className="mt-1 text-2xl font-semibold text-[#252525]">
+                Today&apos;s Reminders
+              </h2>
+
+              <p className="mt-2 text-sm text-[#777]">
+                Your pending reminders, kept close to the day.
+              </p>
+            </div>
+
+            <Link
+              href="/reminders"
+              className="w-fit rounded-xl bg-[#252525] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-[#111]"
+            >
+              View all reminders
+            </Link>
+          </div>
+
+          <div className="mt-6 space-y-3">
+            {reminders.length === 0 ? (
+              <div className="rounded-2xl bg-[#f5f5f0] p-6 text-center">
+                <CheckCircle2
+                  size={22}
+                  className="mx-auto text-[#777]"
+                  strokeWidth={1.7}
+                />
+
+                <p className="mt-3 text-sm font-medium text-[#555]">
+                  No pending reminders.
+                </p>
+
+                <p className="mt-1 text-xs text-[#999]">
+                  You&apos;re all clear for now.
+                </p>
+              </div>
+            ) : (
+              reminders.slice(0, 5).map((reminder) => (
+                <div
+                  key={reminder.id}
+                  className="flex flex-col gap-3 rounded-2xl border border-black/5 p-4 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <h3 className="font-medium text-[#333]">
+                      {reminder.title}
+                    </h3>
+
+                    {reminder.description && (
+                      <p className="mt-1 text-sm text-[#777]">
+                        {reminder.description}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-2 text-xs text-[#999]">
+                    <Clock3 size={14} strokeWidth={1.7} />
+                    {reminder.reminder_date}
+                    {reminder.reminder_time
+                      ? ` · ${formatDueTime(reminder.reminder_time)}`
+                      : ""}
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </section>
