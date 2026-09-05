@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { Check, Plus, Trash2 } from "lucide-react";
+import { Bell, Check, Plus, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 type Reminder = {
@@ -37,8 +37,49 @@ export default function RemindersPage() {
   const [reminderDate, setReminderDate] = useState("");
   const [reminderTime, setReminderTime] = useState("");
 
+  const [notificationPermission, setNotificationPermission] =
+    useState<NotificationPermission>("default");
+
+  async function loadReminders() {
+    setLoading(true);
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("reminders")
+      .select(
+        "id, user_id, title, description, reminder_date, reminder_time, completed",
+      )
+      .eq("user_id", user.id)
+      .order("reminder_date", { ascending: true })
+      .order("reminder_time", { ascending: true });
+
+    if (!error) {
+      setReminders((data ?? []) as Reminder[]);
+    }
+
+    setLoading(false);
+  }
+
   useEffect(() => {
     setReminderDate(getLocalDateString());
+
+    if ("Notification" in window) {
+      setNotificationPermission(Notification.permission);
+    }
+
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch((error) => {
+        console.error("AKRI Service Worker registration failed:", error);
+      });
+    }
 
     async function loadInitialReminders() {
       setLoading(true);
@@ -71,33 +112,105 @@ export default function RemindersPage() {
     loadInitialReminders();
   }, [supabase]);
 
-  async function loadReminders() {
-    setLoading(true);
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      setLoading(false);
+  async function enableNotifications() {
+    if (!("Notification" in window)) {
+      setMessage("This browser does not support notifications.");
       return;
     }
 
-    const { data, error } = await supabase
-      .from("reminders")
-      .select(
-        "id, user_id, title, description, reminder_date, reminder_time, completed",
-      )
-      .eq("user_id", user.id)
-      .order("reminder_date", { ascending: true })
-      .order("reminder_time", { ascending: true });
+    const permission = await Notification.requestPermission();
 
-    if (!error) {
-      setReminders((data ?? []) as Reminder[]);
+    setNotificationPermission(permission);
+
+    if (permission === "granted") {
+      setMessage("Notifications are enabled.");
+
+      try {
+        const registration = await navigator.serviceWorker.ready;
+
+        await registration.showNotification("AKRI notifications enabled", {
+          body: "You will receive reminder alerts while AKRI is open.",
+          tag: "akri-notifications-enabled",
+        });
+      } catch (error) {
+        console.error("AKRI notification setup failed:", error);
+        setMessage("Notifications are enabled, but the notification test failed.");
+      }
+    } else if (permission === "denied") {
+      setMessage("Notifications are blocked in this browser.");
+    } else {
+      setMessage("Notification permission was not granted.");
+    }
+  }
+
+  useEffect(() => {
+    if (notificationPermission !== "granted") {
+      return;
     }
 
-    setLoading(false);
-  }
+    if (reminders.length === 0) {
+      return;
+    }
+
+    const checkDueReminders = async () => {
+      const now = new Date();
+      const today = getLocalDateString();
+
+      for (const reminder of reminders) {
+        if (reminder.completed) {
+          continue;
+        }
+
+        if (reminder.reminder_date !== today) {
+          continue;
+        }
+
+        const reminderTime = reminder.reminder_time.slice(0, 5);
+
+        const [hours, minutes] = reminderTime.split(":").map(Number);
+
+        const reminderDate = new Date();
+        reminderDate.setHours(hours, minutes, 0, 0);
+
+        if (now.getTime() < reminderDate.getTime()) {
+          continue;
+        }
+
+        const notificationKey =
+          `akri-notified-${reminder.id}-${reminder.reminder_date}-${reminderTime}`;
+
+        if (localStorage.getItem(notificationKey)) {
+          continue;
+        }
+
+        try {
+          const registration = await navigator.serviceWorker.ready;
+
+          await registration.showNotification(reminder.title, {
+            body:
+              reminder.description ||
+              `Your AKRI reminder was scheduled for ${reminderTime}.`,
+            tag: notificationKey,
+          });
+
+          localStorage.setItem(notificationKey, "true");
+        } catch (error) {
+          console.error(
+            "AKRI reminder notification failed:",
+            error,
+          );
+        }
+      }
+    };
+
+    checkDueReminders();
+
+    const interval = window.setInterval(checkDueReminders, 15000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [reminders, notificationPermission]);
 
   async function addReminder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -192,14 +305,50 @@ export default function RemindersPage() {
         <div className="mb-8">
           <p className="text-sm text-[#999]">AKRI</p>
 
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-            Reminders
-          </h1>
+          <div className="mt-1 flex items-center gap-3">
+            <h1 className="text-3xl font-semibold tracking-tight">
+              Reminders
+            </h1>
+
+            {notificationPermission === "granted" && (
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#eef8f3]">
+                <Bell size={16} strokeWidth={1.8} />
+              </div>
+            )}
+          </div>
 
           <p className="mt-2 text-sm text-[#777]">
             Keep important things visible without carrying them in your head.
           </p>
         </div>
+
+        {notificationPermission !== "granted" && (
+          <section className="mb-6 rounded-3xl border border-black/5 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Bell size={17} strokeWidth={1.8} />
+
+                  <h2 className="font-medium">
+                    Enable reminder notifications
+                  </h2>
+                </div>
+
+                <p className="mt-1 text-xs leading-5 text-[#888]">
+                  AKRI can alert you when a reminder is due while AKRI is open.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={enableNotifications}
+                className="rounded-xl bg-[#252525] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#333]"
+              >
+                Enable notifications
+              </button>
+            </div>
+          </section>
+        )}
 
         <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
           <section className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
