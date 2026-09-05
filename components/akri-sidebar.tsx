@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Bell,
   CheckSquare,
   CircleUserRound,
   ClipboardList,
@@ -14,6 +15,7 @@ const navigation = [
   { name: "Dashboard", icon: Home, href: "/dashboard" },
   { name: "Our Day", icon: CheckSquare, href: "/our-day" },
   { name: "Tasks", icon: ClipboardList, href: "/tasks" },
+  { name: "Reminders", icon: Bell, href: "/reminders" },
   { name: "Akshaya", icon: CircleUserRound, href: "/akshaya" },
   { name: "Rishi", icon: CircleUserRound, href: "/rishi" },
   { name: "Sleep", icon: Moon, href: "/sleep" },
