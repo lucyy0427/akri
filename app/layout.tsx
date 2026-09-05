@@ -39,12 +39,11 @@ export default function RootLayout({
             <AkriSidebar />
 
             <div className="flex-1">
-            {children}
-          </div>
-          
-          <MobileNav />
-        </div>
+              {children}
+            </div>
 
+            <MobileNav />
+          </div>
         </ThemeProvider>
       </body>
     </html>

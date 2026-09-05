@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Bell, CheckCircle2, Clock3 } from "lucide-react";
+import {
+  Bell,
+  CheckCircle2,
+  Clock3,
+  Moon,
+  Plus,
+  Wallet,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 const supabase = createClient();
@@ -52,12 +59,26 @@ type Task = {
   completed: boolean;
 };
 
+type FinanceEntry = {
+  id: string;
+  entry_type: "income" | "expense";
+  amount: number | string;
+  entry_date: string;
+};
+
 function getLocalDateString(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
+}
+
+function getMonthStartString(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+
+  return `${year}-${month}-01`;
 }
 
 export default function DashboardPage() {
@@ -72,12 +93,17 @@ export default function DashboardPage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
 
+  const [monthlyIncome, setMonthlyIncome] = useState(0);
+  const [monthlyExpenses, setMonthlyExpenses] = useState(0);
+
   useEffect(() => {
     async function loadDashboard() {
       setLoading(true);
       setMessage("");
 
       const currentDate = getLocalDateString();
+      const monthStart = getMonthStartString();
+
       setToday(currentDate);
 
       const {
@@ -209,6 +235,39 @@ export default function DashboardPage() {
       }
 
       setReminders((reminderData ?? []) as Reminder[]);
+
+      const { data: financeData, error: financeError } =
+        await supabase
+          .from("finance_entries")
+          .select("id, entry_type, amount, entry_date")
+          .eq("user_id", user.id)
+          .gte("entry_date", monthStart)
+          .lte("entry_date", currentDate)
+          .order("entry_date", { ascending: false });
+
+      if (financeError) {
+        console.error(financeError);
+      } else {
+        const financeEntries = (financeData ??
+          []) as FinanceEntry[];
+
+        let income = 0;
+        let expenses = 0;
+
+        for (const entry of financeEntries) {
+          const amount = Number(entry.amount) || 0;
+
+          if (entry.entry_type === "income") {
+            income += amount;
+          } else {
+            expenses += amount;
+          }
+        }
+
+        setMonthlyIncome(income);
+        setMonthlyExpenses(expenses);
+      }
+
       setLoading(false);
     }
 
@@ -275,7 +334,61 @@ export default function DashboardPage() {
     const suffix = hour >= 12 ? "PM" : "AM";
     const displayHour = hour % 12 || 12;
 
-    return `${displayHour}:${String(minute).padStart(2, "0")} ${suffix}`;
+    return `${displayHour}:${String(minute).padStart(
+      2,
+      "0",
+    )} ${suffix}`;
+  }
+
+  function calculateSleepDuration(tracker: Tracker | null) {
+    if (!tracker?.wake_time || !tracker?.sleep_time) {
+      return "—";
+    }
+
+    const [sleepHour, sleepMinute] = tracker.sleep_time
+      .slice(0, 5)
+      .split(":")
+      .map(Number);
+
+    const [wakeHour, wakeMinute] = tracker.wake_time
+      .slice(0, 5)
+      .split(":")
+      .map(Number);
+
+    let sleepMinutes = sleepHour * 60 + sleepMinute;
+    const wakeMinutes = wakeHour * 60 + wakeMinute;
+
+    if (sleepMinutes > wakeMinutes) {
+      sleepMinutes -= 24 * 60;
+    }
+
+    const duration = wakeMinutes - sleepMinutes;
+
+    if (duration <= 0) {
+      return "—";
+    }
+
+    const hours = Math.floor(duration / 60);
+    const minutes = duration % 60;
+
+    return minutes === 0
+      ? `${hours}h`
+      : `${hours}h ${minutes}m`;
+  }
+
+  function formatDate(dateString: string) {
+    if (!dateString) {
+      return "";
+    }
+
+    const date = new Date(`${dateString}T12:00:00`);
+
+    return date.toLocaleDateString("en-IN", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
   }
 
   const attentionTasks = tasks
@@ -294,11 +407,13 @@ export default function DashboardPage() {
       task.due_date < today,
   ).length;
 
+  const monthlyBalance = monthlyIncome - monthlyExpenses;
+
   if (loading) {
     return (
-      <main className="min-h-screen bg-[#f5f5f0] p-6 text-[#252525] md:p-10">
+      <main className="min-h-screen bg-[#f5f5f0] p-6 text-[#252525] md:p-10 dark:bg-[#111] dark:text-white">
         <div className="mx-auto max-w-7xl">
-          <p className="text-sm text-[#777]">
+          <p className="text-sm text-[#777] dark:text-[#aaa]">
             Loading your dashboard...
           </p>
         </div>
@@ -308,14 +423,14 @@ export default function DashboardPage() {
 
   if (message) {
     return (
-      <main className="min-h-screen bg-[#f5f5f0] p-6 text-[#252525] md:p-10">
+      <main className="min-h-screen bg-[#f5f5f0] p-6 text-[#252525] md:p-10 dark:bg-[#111] dark:text-white">
         <div className="mx-auto max-w-7xl">
-          <div className="rounded-3xl border border-black/5 bg-white p-8 shadow-sm">
-            <h1 className="text-2xl font-semibold text-[#252525]">
+          <div className="rounded-3xl border border-black/5 bg-white p-8 shadow-sm dark:border-white/10 dark:bg-[#1d1d1d]">
+            <h1 className="text-2xl font-semibold">
               Dashboard
             </h1>
 
-            <p className="mt-3 text-sm text-[#777]">
+            <p className="mt-3 text-sm text-[#777] dark:text-[#aaa]">
               {message}
             </p>
           </div>
@@ -325,7 +440,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f5f0] p-5 pb-24 text-[#252525] md:p-10 md:pb-10">
+    <main className="min-h-screen bg-[#f5f5f0] p-5 pb-24 text-[#252525] transition-colors md:p-10 md:pb-10 dark:bg-[#111] dark:text-white">
       <div className="mx-auto max-w-7xl">
 
         {/* Header */}
@@ -334,23 +449,23 @@ export default function DashboardPage() {
             AKRI
           </p>
 
-          <h1 className="mt-2 text-4xl font-semibold tracking-tight text-[#252525]">
+          <h1 className="mt-2 text-4xl font-semibold tracking-tight">
             Dashboard
           </h1>
 
-          <p className="mt-2 text-sm text-[#777]">
+          <p className="mt-2 text-sm text-[#777] dark:text-[#aaa]">
             Your shared life and work overview.
           </p>
 
           {today && (
             <p className="mt-3 text-xs text-[#999]">
-              {today}
+              {formatDate(today)}
             </p>
           )}
         </div>
 
         {/* Today's Tasks */}
-        <section className="mb-5 rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
+        <section className="mb-5 rounded-3xl border border-black/5 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-[#1d1d1d]">
           <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
               <div className="flex items-center gap-2">
@@ -359,17 +474,17 @@ export default function DashboardPage() {
                 </p>
 
                 {overdueCount > 0 && (
-                  <span className="rounded-full bg-[#f5f5f0] px-2.5 py-1 text-[11px] text-[#777]">
+                  <span className="rounded-full bg-[#f5f5f0] px-2.5 py-1 text-[11px] text-[#777] dark:bg-[#292929]">
                     {overdueCount} overdue
                   </span>
                 )}
               </div>
 
-              <h2 className="mt-1 text-2xl font-semibold text-[#252525]">
+              <h2 className="mt-1 text-2xl font-semibold">
                 Today&apos;s Tasks
               </h2>
 
-              <p className="mt-2 text-sm text-[#777]">
+              <p className="mt-2 text-sm text-[#777] dark:text-[#aaa]">
                 The things that need your attention.
               </p>
             </div>
@@ -384,14 +499,14 @@ export default function DashboardPage() {
 
           <div className="mt-6 space-y-3">
             {attentionTasks.length === 0 ? (
-              <div className="rounded-2xl bg-[#f5f5f0] p-6 text-center">
+              <div className="rounded-2xl bg-[#f5f5f0] p-6 text-center dark:bg-[#292929]">
                 <CheckCircle2
                   size={22}
                   className="mx-auto text-[#777]"
                   strokeWidth={1.7}
                 />
 
-                <p className="mt-3 text-sm font-medium text-[#555]">
+                <p className="mt-3 text-sm font-medium text-[#555] dark:text-[#ddd]">
                   Nothing urgent right now.
                 </p>
 
@@ -408,27 +523,27 @@ export default function DashboardPage() {
                 return (
                   <div
                     key={task.id}
-                    className="flex flex-col gap-3 rounded-2xl border border-black/5 p-4 sm:flex-row sm:items-center sm:justify-between"
+                    className="flex flex-col gap-3 rounded-2xl border border-black/5 p-4 dark:border-white/10 sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-medium text-[#333]">
+                        <h3 className="font-medium">
                           {task.title}
                         </h3>
 
-                        <span className="rounded-full bg-[#f5f5f0] px-2.5 py-1 text-xs text-[#777]">
+                        <span className="rounded-full bg-[#f5f5f0] px-2.5 py-1 text-xs text-[#777] dark:bg-[#292929]">
                           {getPersonName(task.assigned_to)}
                         </span>
 
                         {isOverdue && (
-                          <span className="rounded-full bg-[#f5f5f0] px-2.5 py-1 text-xs text-[#777]">
+                          <span className="rounded-full bg-[#f5f5f0] px-2.5 py-1 text-xs text-[#777] dark:bg-[#292929]">
                             Overdue
                           </span>
                         )}
                       </div>
 
                       {task.description && (
-                        <p className="mt-1 text-sm text-[#777]">
+                        <p className="mt-1 text-sm text-[#777] dark:text-[#aaa]">
                           {task.description}
                         </p>
                       )}
@@ -437,9 +552,7 @@ export default function DashboardPage() {
                     <div className="flex shrink-0 items-center gap-2 text-xs text-[#999]">
                       <Clock3 size={14} strokeWidth={1.7} />
 
-                      {isOverdue
-                        ? "Was due "
-                        : "Due "}
+                      {isOverdue ? "Was due " : "Due "}
 
                       {task.due_date
                         ? task.due_date
@@ -457,7 +570,7 @@ export default function DashboardPage() {
         </section>
 
         {/* Today's Reminders */}
-        <section className="mb-5 rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
+        <section className="mb-5 rounded-3xl border border-black/5 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-[#1d1d1d]">
           <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
               <div className="flex items-center gap-2">
@@ -465,16 +578,16 @@ export default function DashboardPage() {
                   Personal
                 </p>
 
-                <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-[#f5f5f0]">
+                <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-[#f5f5f0] dark:bg-[#292929]">
                   <Bell size={15} strokeWidth={1.7} />
                 </span>
               </div>
 
-              <h2 className="mt-1 text-2xl font-semibold text-[#252525]">
+              <h2 className="mt-1 text-2xl font-semibold">
                 Today&apos;s Reminders
               </h2>
 
-              <p className="mt-2 text-sm text-[#777]">
+              <p className="mt-2 text-sm text-[#777] dark:text-[#aaa]">
                 Your pending reminders, kept close to the day.
               </p>
             </div>
@@ -489,14 +602,14 @@ export default function DashboardPage() {
 
           <div className="mt-6 space-y-3">
             {reminders.length === 0 ? (
-              <div className="rounded-2xl bg-[#f5f5f0] p-6 text-center">
+              <div className="rounded-2xl bg-[#f5f5f0] p-6 text-center dark:bg-[#292929]">
                 <CheckCircle2
                   size={22}
                   className="mx-auto text-[#777]"
                   strokeWidth={1.7}
                 />
 
-                <p className="mt-3 text-sm font-medium text-[#555]">
+                <p className="mt-3 text-sm font-medium text-[#555] dark:text-[#ddd]">
                   No pending reminders.
                 </p>
 
@@ -508,15 +621,15 @@ export default function DashboardPage() {
               reminders.slice(0, 5).map((reminder) => (
                 <div
                   key={reminder.id}
-                  className="flex flex-col gap-3 rounded-2xl border border-black/5 p-4 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-3 rounded-2xl border border-black/5 p-4 dark:border-white/10 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0">
-                    <h3 className="font-medium text-[#333]">
+                    <h3 className="font-medium">
                       {reminder.title}
                     </h3>
 
                     {reminder.description && (
-                      <p className="mt-1 text-sm text-[#777]">
+                      <p className="mt-1 text-sm text-[#777] dark:text-[#aaa]">
                         {reminder.description}
                       </p>
                     )}
@@ -526,7 +639,9 @@ export default function DashboardPage() {
                     <Clock3 size={14} strokeWidth={1.7} />
                     {reminder.reminder_date}
                     {reminder.reminder_time
-                      ? ` · ${formatDueTime(reminder.reminder_time)}`
+                      ? ` · ${formatDueTime(
+                          reminder.reminder_time,
+                        )}`
                       : ""}
                   </div>
                 </div>
@@ -535,19 +650,83 @@ export default function DashboardPage() {
           </div>
         </section>
 
+        {/* Monthly Finance */}
+        <section className="mb-5 rounded-3xl border border-black/5 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-[#1d1d1d]">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-medium uppercase tracking-wider text-[#999]">
+                  Money
+                </p>
+
+                <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-[#f5f5f0] dark:bg-[#292929]">
+                  <Wallet size={15} strokeWidth={1.7} />
+                </span>
+              </div>
+
+              <h2 className="mt-1 text-2xl font-semibold">
+                This Month
+              </h2>
+
+              <p className="mt-2 text-sm text-[#777] dark:text-[#aaa]">
+                Your personal finance snapshot.
+              </p>
+            </div>
+
+            <Link
+              href="/finance"
+              className="w-fit rounded-xl bg-[#252525] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-[#111]"
+            >
+              Open Finance
+            </Link>
+          </div>
+
+          <div className="mt-6 grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl bg-[#f5f5f0] p-5 dark:bg-[#292929]">
+              <p className="text-xs text-[#999]">
+                Income
+              </p>
+
+              <p className="mt-2 text-xl font-semibold">
+                ₹{monthlyIncome.toLocaleString("en-IN")}
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-[#f5f5f0] p-5 dark:bg-[#292929]">
+              <p className="text-xs text-[#999]">
+                Expenses
+              </p>
+
+              <p className="mt-2 text-xl font-semibold">
+                ₹{monthlyExpenses.toLocaleString("en-IN")}
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-[#f5f5f0] p-5 dark:bg-[#292929]">
+              <p className="text-xs text-[#999]">
+                Balance
+              </p>
+
+              <p className="mt-2 text-xl font-semibold">
+                ₹{monthlyBalance.toLocaleString("en-IN")}
+              </p>
+            </div>
+          </div>
+        </section>
+
         {/* Shared overview */}
-        <section className="mb-5 rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
+        <section className="mb-5 rounded-3xl border border-black/5 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-[#1d1d1d]">
           <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
               <p className="text-xs font-medium uppercase tracking-wider text-[#999]">
                 Together
               </p>
 
-              <h2 className="mt-1 text-2xl font-semibold text-[#252525]">
+              <h2 className="mt-1 text-2xl font-semibold">
                 Our Day
               </h2>
 
-              <p className="mt-2 text-sm text-[#777]">
+              <p className="mt-2 text-sm text-[#777] dark:text-[#aaa]">
                 {shared?.shared_note ||
                   "Nothing added to your shared day yet."}
               </p>
@@ -562,9 +741,9 @@ export default function DashboardPage() {
           </div>
 
           <div className="mt-6 grid gap-3 md:grid-cols-2">
-            <div className="rounded-2xl bg-[#f5f5f0] p-4">
+            <div className="rounded-2xl bg-[#f5f5f0] p-4 dark:bg-[#292929]">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-medium text-[#555]">
+                <p className="text-sm font-medium text-[#555] dark:text-[#ddd]">
                   Akshaya&apos;s task
                 </p>
 
@@ -575,14 +754,14 @@ export default function DashboardPage() {
                 </span>
               </div>
 
-              <p className="mt-2 text-sm text-[#777]">
+              <p className="mt-2 text-sm text-[#777] dark:text-[#aaa]">
                 {shared?.akshaya_task || "No task assigned"}
               </p>
             </div>
 
-            <div className="rounded-2xl bg-[#f5f5f0] p-4">
+            <div className="rounded-2xl bg-[#f5f5f0] p-4 dark:bg-[#292929]">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-medium text-[#555]">
+                <p className="text-sm font-medium text-[#555] dark:text-[#ddd]">
                   Rishi&apos;s task
                 </p>
 
@@ -593,7 +772,7 @@ export default function DashboardPage() {
                 </span>
               </div>
 
-              <p className="mt-2 text-sm text-[#777]">
+              <p className="mt-2 text-sm text-[#777] dark:text-[#aaa]">
                 {shared?.rishi_task || "No task assigned"}
               </p>
             </div>
@@ -604,224 +783,253 @@ export default function DashboardPage() {
         <div className="grid gap-5 md:grid-cols-2">
 
           {/* Akshaya */}
-          <section className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
+          <section className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-[#1d1d1d]">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-medium uppercase tracking-wider text-[#999]">
                   Personal
                 </p>
 
-                <h2 className="mt-1 text-2xl font-semibold text-[#252525]">
+                <h2 className="mt-1 text-2xl font-semibold">
                   Akshaya
                 </h2>
               </div>
 
               <Link
                 href="/akshaya"
-                className="text-sm text-[#777] underline-offset-4 hover:text-[#252525] hover:underline"
+                className="text-sm text-[#777] underline-offset-4 hover:text-[#252525] hover:underline dark:text-[#aaa] dark:hover:text-white"
               >
                 Open
               </Link>
             </div>
 
             <div className="mt-6 grid grid-cols-2 gap-3">
-              <div className="rounded-2xl bg-[#f5f5f0] p-4">
+              <div className="rounded-2xl bg-[#f5f5f0] p-4 dark:bg-[#292929]">
                 <p className="text-xs text-[#999]">
                   Mood
                 </p>
 
-                <p className="mt-1 text-sm font-medium text-[#555]">
+                <p className="mt-1 text-sm font-medium">
                   {akshaya?.mood || "—"}
                 </p>
               </div>
 
-              <div className="rounded-2xl bg-[#f5f5f0] p-4">
+              <div className="rounded-2xl bg-[#f5f5f0] p-4 dark:bg-[#292929]">
                 <p className="text-xs text-[#999]">
                   Progress
                 </p>
 
-                <p className="mt-1 text-sm font-medium text-[#555]">
+                <p className="mt-1 text-sm font-medium">
                   {personProgress(akshaya)}
                 </p>
               </div>
 
-              <div className="rounded-2xl bg-[#f5f5f0] p-4">
+              <div className="rounded-2xl bg-[#f5f5f0] p-4 dark:bg-[#292929]">
                 <p className="text-xs text-[#999]">
                   Work
                 </p>
 
-                <p className="mt-1 text-sm font-medium text-[#555]">
+                <p className="mt-1 text-sm font-medium">
                   {formatMinutes(akshaya?.work_minutes)}
                 </p>
               </div>
 
-              <div className="rounded-2xl bg-[#f5f5f0] p-4">
+              <div className="rounded-2xl bg-[#f5f5f0] p-4 dark:bg-[#292929]">
                 <p className="text-xs text-[#999]">
                   College
                 </p>
 
-                <p className="mt-1 text-sm font-medium text-[#555]">
+                <p className="mt-1 text-sm font-medium">
                   {formatMinutes(akshaya?.college_minutes)}
                 </p>
               </div>
             </div>
 
-            <div className="mt-3 flex items-center justify-between rounded-2xl bg-[#f5f5f0] p-4">
+            <div className="mt-3 flex items-center justify-between rounded-2xl bg-[#f5f5f0] p-4 dark:bg-[#292929]">
               <div>
                 <p className="text-xs text-[#999]">
                   Workout
                 </p>
 
-                <p className="mt-1 text-sm font-medium text-[#555]">
+                <p className="mt-1 text-sm font-medium">
                   {akshaya?.workout_done
                     ? "Completed"
                     : "Not completed"}
                 </p>
               </div>
 
-              <p className="text-xs text-[#999]">
-                Sleep: {akshaya?.sleep_time || "—"}
-              </p>
+              <div className="flex items-center gap-2 text-xs text-[#999]">
+                <Moon size={14} strokeWidth={1.7} />
+                Sleep: {calculateSleepDuration(akshaya)}
+              </div>
             </div>
           </section>
 
           {/* Rishi */}
-          <section className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
+          <section className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-[#1d1d1d]">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-medium uppercase tracking-wider text-[#999]">
                   Personal
                 </p>
 
-                <h2 className="mt-1 text-2xl font-semibold text-[#252525]">
+                <h2 className="mt-1 text-2xl font-semibold">
                   Rishi
                 </h2>
               </div>
 
               <Link
                 href="/rishi"
-                className="text-sm text-[#777] underline-offset-4 hover:text-[#252525] hover:underline"
+                className="text-sm text-[#777] underline-offset-4 hover:text-[#252525] hover:underline dark:text-[#aaa] dark:hover:text-white"
               >
                 Open
               </Link>
             </div>
 
             <div className="mt-6 grid grid-cols-2 gap-3">
-              <div className="rounded-2xl bg-[#f5f5f0] p-4">
+              <div className="rounded-2xl bg-[#f5f5f0] p-4 dark:bg-[#292929]">
                 <p className="text-xs text-[#999]">
                   Mood
                 </p>
 
-                <p className="mt-1 text-sm font-medium text-[#555]">
+                <p className="mt-1 text-sm font-medium">
                   {rishi?.mood || "—"}
                 </p>
               </div>
 
-              <div className="rounded-2xl bg-[#f5f5f0] p-4">
+              <div className="rounded-2xl bg-[#f5f5f0] p-4 dark:bg-[#292929]">
                 <p className="text-xs text-[#999]">
                   Progress
                 </p>
 
-                <p className="mt-1 text-sm font-medium text-[#555]">
+                <p className="mt-1 text-sm font-medium">
                   {personProgress(rishi)}
                 </p>
               </div>
 
-              <div className="rounded-2xl bg-[#f5f5f0] p-4">
+              <div className="rounded-2xl bg-[#f5f5f0] p-4 dark:bg-[#292929]">
                 <p className="text-xs text-[#999]">
                   Work
                 </p>
 
-                <p className="mt-1 text-sm font-medium text-[#555]">
+                <p className="mt-1 text-sm font-medium">
                   {formatMinutes(rishi?.work_minutes)}
                 </p>
               </div>
 
-              <div className="rounded-2xl bg-[#f5f5f0] p-4">
+              <div className="rounded-2xl bg-[#f5f5f0] p-4 dark:bg-[#292929]">
                 <p className="text-xs text-[#999]">
                   College
                 </p>
 
-                <p className="mt-1 text-sm font-medium text-[#555]">
+                <p className="mt-1 text-sm font-medium">
                   {formatMinutes(rishi?.college_minutes)}
                 </p>
               </div>
             </div>
 
-            <div className="mt-3 flex items-center justify-between rounded-2xl bg-[#f5f5f0] p-4">
+            <div className="mt-3 flex items-center justify-between rounded-2xl bg-[#f5f5f0] p-4 dark:bg-[#292929]">
               <div>
                 <p className="text-xs text-[#999]">
                   Workout
                 </p>
 
-                <p className="mt-1 text-sm font-medium text-[#555]">
+                <p className="mt-1 text-sm font-medium">
                   {rishi?.workout_done
                     ? "Completed"
                     : "Not completed"}
                 </p>
               </div>
 
-              <p className="text-xs text-[#999]">
-                Sleep: {rishi?.sleep_time || "—"}
-              </p>
+              <div className="flex items-center gap-2 text-xs text-[#999]">
+                <Moon size={14} strokeWidth={1.7} />
+                Sleep: {calculateSleepDuration(rishi)}
+              </div>
             </div>
           </section>
         </div>
 
-        {/* Quick links */}
-        <section className="mt-5 rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
+        {/* Quick actions */}
+        <section className="mt-5 rounded-3xl border border-black/5 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-[#1d1d1d]">
           <p className="text-xs font-medium uppercase tracking-wider text-[#999]">
-            Quick access
+            Quick actions
           </p>
 
-          <div className="mt-4 flex flex-wrap gap-3">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Link
               href="/tasks"
-              className="rounded-xl bg-[#f5f5f0] px-4 py-2.5 text-sm font-medium text-[#555] transition hover:bg-[#eeeeea]"
+              className="group flex items-center gap-3 rounded-2xl bg-[#f5f5f0] p-4 transition hover:bg-[#eeeeea] dark:bg-[#292929] dark:hover:bg-[#333]"
             >
-              Tasks
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white dark:bg-[#1d1d1d]">
+                <Plus size={17} strokeWidth={1.8} />
+              </span>
+
+              <div>
+                <p className="text-sm font-medium">
+                  Add task
+                </p>
+
+                <p className="mt-0.5 text-xs text-[#999]">
+                  Assign something
+                </p>
+              </div>
+            </Link>
+
+            <Link
+              href="/reminders"
+              className="group flex items-center gap-3 rounded-2xl bg-[#f5f5f0] p-4 transition hover:bg-[#eeeeea] dark:bg-[#292929] dark:hover:bg-[#333]"
+            >
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white dark:bg-[#1d1d1d]">
+                <Bell size={17} strokeWidth={1.8} />
+              </span>
+
+              <div>
+                <p className="text-sm font-medium">
+                  Add reminder
+                </p>
+
+                <p className="mt-0.5 text-xs text-[#999]">
+                  Keep something in mind
+                </p>
+              </div>
             </Link>
 
             <Link
               href="/our-day"
-              className="rounded-xl bg-[#f5f5f0] px-4 py-2.5 text-sm text-[#555] transition hover:bg-[#eeeeea]"
+              className="group flex items-center gap-3 rounded-2xl bg-[#f5f5f0] p-4 transition hover:bg-[#eeeeea] dark:bg-[#292929] dark:hover:bg-[#333]"
             >
-              Our Day
-            </Link>
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white dark:bg-[#1d1d1d]">
+                <CheckCircle2 size={17} strokeWidth={1.8} />
+              </span>
 
-            <Link
-              href="/akshaya"
-              className="rounded-xl bg-[#f5f5f0] px-4 py-2.5 text-sm text-[#555] transition hover:bg-[#eeeeea]"
-            >
-              Akshaya
-            </Link>
+              <div>
+                <p className="text-sm font-medium">
+                  Update Our Day
+                </p>
 
-            <Link
-              href="/rishi"
-              className="rounded-xl bg-[#f5f5f0] px-4 py-2.5 text-sm text-[#555] transition hover:bg-[#eeeeea]"
-            >
-              Rishi
-            </Link>
-
-            <Link
-              href="/sleep"
-              className="rounded-xl bg-[#f5f5f0] px-4 py-2.5 text-sm text-[#555] transition hover:bg-[#eeeeea]"
-            >
-              Sleep
+                <p className="mt-0.5 text-xs text-[#999]">
+                  Shared progress
+                </p>
+              </div>
             </Link>
 
             <Link
               href="/finance"
-              className="rounded-xl bg-[#f5f5f0] px-4 py-2.5 text-sm text-[#555] transition hover:bg-[#eeeeea]"
+              className="group flex items-center gap-3 rounded-2xl bg-[#f5f5f0] p-4 transition hover:bg-[#eeeeea] dark:bg-[#292929] dark:hover:bg-[#333]"
             >
-              Finance
-            </Link>
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white dark:bg-[#1d1d1d]">
+                <Wallet size={17} strokeWidth={1.8} />
+              </span>
 
-            <Link
-              href="/analytics"
-              className="rounded-xl bg-[#f5f5f0] px-4 py-2.5 text-sm text-[#555] transition hover:bg-[#eeeeea]"
-            >
-              Analytics
+              <div>
+                <p className="text-sm font-medium">
+                  Add finance
+                </p>
+
+                <p className="mt-0.5 text-xs text-[#999]">
+                  Income or expense
+                </p>
+              </div>
             </Link>
           </div>
         </section>
